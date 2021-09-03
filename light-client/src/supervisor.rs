@@ -1,6 +1,6 @@
 //! Supervisor and Handle implementation.
 
-use crossbeam_channel as channel;
+use async_channel as channel;
 
 use tendermint::evidence::{ConflictingHeadersEvidence, Evidence};
 
@@ -12,23 +12,25 @@ use crate::peer_list::PeerList;
 use crate::state::State;
 use crate::types::{Height, LatestStatus, LightBlock, PeerId, Status};
 use async_recursion::async_recursion;
+use async_trait::async_trait;
 
 /// Provides an interface to the supervisor for use in downstream code.
+#[async_trait]
 pub trait Handle: Send + Sync {
     /// Get latest trusted block.
-    fn latest_trusted(&self) -> Result<Option<LightBlock>, Error>;
+    async fn latest_trusted(&self) -> Result<Option<LightBlock>, Error>;
 
     /// Get the latest status.
-    fn latest_status(&self) -> Result<LatestStatus, Error>;
+    async fn latest_status(&self) -> Result<LatestStatus, Error>;
 
     /// Verify to the highest block.
-    fn verify_to_highest(&self) -> Result<LightBlock, Error>;
+    async fn verify_to_highest(&self) -> Result<LightBlock, Error>;
 
     /// Verify to the block at the given height.
-    fn verify_to_target(&self, _height: Height) -> Result<LightBlock, Error>;
+    async fn verify_to_target(&self, _height: Height) -> Result<LightBlock, Error>;
 
     /// Terminate the underlying [`Supervisor`].
-    fn terminate(&self) -> Result<(), Error>;
+    async fn terminate(&self) -> Result<(), Error>;
 }
 
 /// Input events sent by the [`Handle`]s to the [`Supervisor`]. They carry a [`Callback`] which is
@@ -329,28 +331,28 @@ impl Supervisor {
     /// This method should typically be called within a new thread with `std::thread::spawn`.
     pub async fn run(mut self) -> Result<(), Error> {
         loop {
-            let event = self.receiver.recv().map_err(Error::recv)?;
+            let event = self.receiver.recv().await.map_err(Error::recv)?;
 
             match event {
                 HandleInput::LatestTrusted(sender) => {
                     let outcome = self.latest_trusted();
-                    sender.send(outcome).map_err(Error::send)?;
+                    sender.send(outcome).await.map_err(Error::send)?;
                 }
                 HandleInput::Terminate(sender) => {
-                    sender.send(()).map_err(Error::send)?;
+                    sender.send(()).await.map_err(Error::send)?;
                     return Ok(());
                 }
                 HandleInput::VerifyToTarget(height, sender) => {
                     let outcome = self.verify_to_target(height).await;
-                    sender.send(outcome).map_err(Error::send)?;
+                    sender.send(outcome).await.map_err(Error::send)?;
                 }
                 HandleInput::VerifyToHighest(sender) => {
                     let outcome = self.verify_to_highest().await;
-                    sender.send(outcome).map_err(Error::send)?;
+                    sender.send(outcome).await.map_err(Error::send)?;
                 }
                 HandleInput::GetStatus(sender) => {
                     let outcome = self.latest_status();
-                    sender.send(outcome).map_err(Error::send)?;
+                    sender.send(outcome).await.map_err(Error::send)?;
                 }
             }
         }
@@ -371,54 +373,55 @@ impl SupervisorHandle {
         Self { sender }
     }
 
-    fn verify(
+    async fn verify(
         &self,
         make_event: impl FnOnce(channel::Sender<Result<LightBlock, Error>>) -> HandleInput,
     ) -> Result<LightBlock, Error> {
         let (sender, receiver) = channel::bounded::<Result<LightBlock, Error>>(1);
 
         let event = make_event(sender);
-        self.sender.send(event).map_err(Error::send)?;
+        self.sender.send(event).await.map_err(Error::send)?;
 
-        receiver.recv().map_err(Error::recv)?
+        receiver.recv().await.map_err(Error::recv)?
     }
 }
 
+#[async_trait]
 impl Handle for SupervisorHandle {
-    fn latest_trusted(&self) -> Result<Option<LightBlock>, Error> {
+    async fn latest_trusted(&self) -> Result<Option<LightBlock>, Error> {
         let (sender, receiver) = channel::bounded::<Option<LightBlock>>(1);
 
         self.sender
-            .send(HandleInput::LatestTrusted(sender))
+            .send(HandleInput::LatestTrusted(sender)).await
             .map_err(Error::send)?;
 
-        receiver.recv().map_err(Error::recv)
+        receiver.recv().await.map_err(Error::recv)
     }
 
-    fn latest_status(&self) -> Result<LatestStatus, Error> {
+    async fn latest_status(&self) -> Result<LatestStatus, Error> {
         let (sender, receiver) = channel::bounded::<LatestStatus>(1);
         self.sender
-            .send(HandleInput::GetStatus(sender))
+            .send(HandleInput::GetStatus(sender)).await
             .map_err(Error::send)?;
-        receiver.recv().map_err(Error::recv)
+        receiver.recv().await.map_err(Error::recv)
     }
 
-    fn verify_to_highest(&self) -> Result<LightBlock, Error> {
-        self.verify(HandleInput::VerifyToHighest)
+    async fn verify_to_highest(&self) -> Result<LightBlock, Error> {
+        self.verify(HandleInput::VerifyToHighest).await
     }
 
-    fn verify_to_target(&self, height: Height) -> Result<LightBlock, Error> {
-        self.verify(|sender| HandleInput::VerifyToTarget(height, sender))
+    async fn verify_to_target(&self, height: Height) -> Result<LightBlock, Error> {
+        self.verify(|sender| HandleInput::VerifyToTarget(height, sender)).await
     }
 
-    fn terminate(&self) -> Result<(), Error> {
+    async fn terminate(&self) -> Result<(), Error> {
         let (sender, receiver) = channel::bounded::<()>(1);
 
         self.sender
             .send(HandleInput::Terminate(sender))
-            .map_err(Error::send)?;
+            .await.map_err(Error::send)?;
 
-        receiver.recv().map_err(Error::recv)
+        receiver.recv().await.map_err(Error::recv)
     }
 }
 
@@ -505,10 +508,13 @@ mod tests {
 
         let target_height = Height::try_from(height_to_verify).expect("Error while making height");
 
-        (
-            handle.verify_to_target(target_height),
-            handle.latest_status().unwrap(),
-        )
+        crate::utils::block_on(None,async move{
+            (
+                handle.verify_to_target(target_height).await,
+                handle.latest_status().await.unwrap(),
+            )
+        }).unwrap()
+
     }
 
     async fn make_peer_list(

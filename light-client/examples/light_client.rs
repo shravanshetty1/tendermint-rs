@@ -72,7 +72,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             eprintln!("{}\n", CliOptions::usage());
             std::process::exit(1);
         }
-        Some(Command::Sync(sync_opts)) => sync_cmd(sync_opts).unwrap_or_else(|e| {
+        Some(Command::Sync(sync_opts)) => sync_cmd(sync_opts).await.unwrap_or_else(|e| {
             eprintln!("Command failed: {}", e);
             std::process::exit(1);
         }),
@@ -106,7 +106,7 @@ fn make_instance(
     Ok(builder.build())
 }
 
-fn sync_cmd(opts: SyncOpts) -> Result<(), Box<dyn std::error::Error>> {
+async fn sync_cmd(opts: SyncOpts) -> Result<(), Box<dyn std::error::Error>> {
     let primary: PeerId = "BADFADAD0BEFEEDC0C0ADEADBEEFC0FFEEFACADE".parse().unwrap();
     let witness: PeerId = "CEFEEDBADFADAD0C0CEEFACADE0ADEADBEEFC0FF".parse().unwrap();
 
@@ -129,9 +129,8 @@ fn sync_cmd(opts: SyncOpts) -> Result<(), Box<dyn std::error::Error>> {
         supervisor.run().await
     });
 
-
     loop {
-        match handle.verify_to_highest() {
+        match handle.verify_to_highest().await {
             Ok(light_block) => {
                 println!("[info] synced to block {}", light_block.height());
             }
@@ -142,4 +141,5 @@ fn sync_cmd(opts: SyncOpts) -> Result<(), Box<dyn std::error::Error>> {
 
         std::thread::sleep(Duration::from_millis(800));
     }
+
 }

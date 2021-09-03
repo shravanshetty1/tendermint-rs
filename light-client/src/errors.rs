@@ -4,7 +4,7 @@ use std::fmt::Debug;
 use std::time::Duration;
 
 use crate::operations::voting_power::VotingPowerTally;
-use crossbeam_channel as crossbeam;
+use async_channel as crossbeam;
 
 use crate::{
     components::io::IoError,

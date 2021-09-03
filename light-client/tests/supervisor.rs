@@ -12,6 +12,7 @@ use tendermint_light_client::{
     store::LightStore,
     supervisor::{Handle, Instance, Supervisor},
     types::{LightBlock, PeerId, Status, Time},
+    utils
 };
 
 use std::collections::HashMap;
@@ -99,7 +100,7 @@ fn run_multipeer_test(tc: LightClientTest<LightBlock>) {
 
     let target_height = tc.height_to_verify;
 
-    match handle.verify_to_target(target_height) {
+    match utils::block_on(None,async move {handle.verify_to_target(target_height).await}).unwrap() {
         Ok(new_state) => {
             // Check that the expected state and new_state match
             let untrusted_light_block = async_std::task::block_on(io

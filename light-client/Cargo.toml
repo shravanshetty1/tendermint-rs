@@ -43,7 +43,7 @@ tendermint = { version = "0.21.0", path = "../tendermint" }
 tendermint-rpc = { version = "0.21.0", path = "../rpc", default-features = false }
 
 contracts = "0.4.0"
-crossbeam-channel = "0.4.2"
+async-channel = "1.6.1"
 derive_more = "0.99.5"
 futures = "0.3.4"
 serde = "1.0.106"
